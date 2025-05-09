@@ -38,8 +38,13 @@ export class ElfBinary {
 
 export const dataDivisions = {
 	main: "main",
-	assetGroup: "assetGroup",
 
+	
+	assetGroup: "assetGroup",
+	state: "state",
+	subState: "subState",
+	face: "face",
+	anime: "anime",
 	// maplink
 	links: "links",
 

@@ -215,20 +215,16 @@ export default function serializeElfBinary(dataType: DataType, binary: ElfBinary
 				break
 			}
 
-			case DataType.DataNpcModel:
-			case DataType.DataItemModel:
-			case DataType.DataGobjModel:
 			case DataType.DataMobjModel:
-			case DataType.DataPlayerModel:
 				{
 					// ----------------  data  ----------------
-					const dataSymbols = new Map()
-					symbolRelocations.set('.data', dataSymbols)
+					const dataSymbolAddr = new Map()
+					symbolAddrRelocations.set('.data', dataSymbolAddr)
 
 					let data: SerializeContext = {
 						writer: dataWriter,
 						stringRelocations: dataStringRelocations,
-						symbolRelocations: dataSymbols,
+						symbolAddrRelocations: dataSymbolAddr,
 					}
 
 					serializeObjects(data, dataType, binary.data.main, { padding: 1 })

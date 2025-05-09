@@ -72,7 +72,7 @@ export enum DataType {
 	TypeAmount,
 	ListItem,
 	HeartItem,
-
+	ModelType,
 	ModelAssetGroup,
 	ModelState,
 	ModelFaceGroup,

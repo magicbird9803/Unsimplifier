@@ -110,9 +110,11 @@ interface DataTypeMetadata {
 	defaultPadding?: number
 	countSymbol?: string
 	mainSymbol?: string
+	nestedAllValues?: boolean
 	
 	childTypes?: Typedef<DataType>,
-	
+	childFieldLabel?: string
+	childField?: string	
 	// for future sub-types
 	// childField
 	// childFieldLabel
@@ -1615,14 +1617,68 @@ Specifies the type of the item. Possible values:
 		stateCount: new Property("int", undefined, { hidden: true }),
 		field_0x94: "int",
 	},
+	[DataType.ModelType]: {
+		__:{
+			dataDivision: dataDivisions.main,
+			childTypes: {
+				assetGroups: DataType.ModelAssetGroup,
+				states: DataType.ModelState,
+			},
+		},
+		
+		id: "string",
+		field_0x8: new Property("Vector3", "Usage unknown, but one guess would be scale? Please verify."),
+		field_0x14: "short",
+		field_0x16: "short",
+		field_0x18: "short",
+		field_0x1A: "short",
+		field_0x1c: "int",
+		field_0x20: "int",
+		field_0x24: "int",
+		field_0x28: "int",
+		field_0x2c: "int",
+		field_0x30: "int",
+		field_0x34: "int",
+		field_0x38: "float",
+		field_0x3c: "float",
+		field_0x40: "float",
+		field_0x44: "int",
+		field_0x48: "int",
+		field_0x4c: "int",
+		field_0x50: "int",
+		field_0x54: "float",
+		field_0x58: "float",
+		field_0x5c: "float",
+		field_0x60: "float",
+		field_0x64: "float",
+		field_0x68: "int",
+		field_0x6c: "float",
+		field_0x70: "float",
+		field_0x74: "float",
+		// internally also called "files"
+		// was changed because refering to single objects with plural names was confusing 
+		assetGroups: new Property("symbolAddr", undefined, {
+			tabName: "Asset Groups for {type} {id}"
+		}),
+		assetGroupCount: new Property("int", undefined, {hidden: false}),
+		field_0x84: "int",
+		states: new Property("symbolAddr", undefined, {
+			tabName: "States for {type} {id}",
+		}),
+		stateCount: new Property("int", undefined, {hidden: false}),
+		field_0x94: "int",
+		
+	},
+
+
 	[DataType.ModelAssetGroup]: {
 		__: {
-			displayName: "Asset Group",
-			importantField: "fileName",
-			nestedAllValues: true,
-			objectType: dataDivisions.assetGroup,
-		},
 
+			displayName: "Asset Group",
+			identifyingField: "fileName",
+			nestedAllValues: true,
+			dataDivision: dataDivisions.assetGroup,
+		},
 		modelFolder: "string",
 		fileName: "string",
 		field_0x10: "int",
@@ -1630,6 +1686,86 @@ Specifies the type of the item. Possible values:
 		field_0x18: "int",
 		field_0x1c: "int",
 	},
+	[DataType.ModelState]: {
+		__: {
+
+			displayName: "State",
+			identifyingField: "description",
+			childFieldLabel: "faceArrays",
+			childField: "substates",
+			nestedAllValues: true,
+			dataDivision: dataDivisions.state,
+			childTypes: {
+				substates: DataType.ModelFaceGroup,
+			},
+		},
+		description: new Property("string", `
+Description of the state, which doesn't seem to have an effect on its behavior.
+Some commonly found translations:
+
+* 通常 = normal
+* ダメージ = damage
+* 変形 = deformation/variation
+`),
+		substates: new Property("symbolAddr", undefined, {
+			tabName: "SubStates for {type} {id}",
+		}),
+		substateCount: new Property("int", undefined, {hidden: false}),
+		field_0x14: new Property("string", undefined, {hidden: false}),
+	},
+	[DataType.ModelFaceGroup]: {
+		__: {
+
+			displayName: "Face Array",
+			childField: "faces",
+			nestedAllValues: true,
+			dataDivision: dataDivisions.subState,
+			childTypes: {
+				faces: DataType.ModelFace,
+			},
+		},
+
+		
+		field_0x0: "int",
+		field_0x4: "int",
+		faces: new Property("symbolAddr", undefined, {
+			tabName: "Faces for {type} {id}",
+		}),
+		faceCount: new Property("int", undefined, {hidden: false}),
+		field_0x14: "int",
+	},
+	[DataType.ModelFace]: {
+		__: {
+
+			displayName: "Face",
+			childField: "animations",
+			nestedAllValues: true,
+			dataDivision: dataDivisions.face,
+			childTypes: {
+				animations: DataType.ModelAnimation,
+			},
+		},
+		
+		field_0x0: "int",
+		field_0x4: "int",
+		// internally also called "anime"
+		animations: new Property("symbolAddr", undefined, {
+			tabName: "Animate for {type} {id}",
+		}),
+		animationCount: new Property("int", undefined, {hidden: false}),
+		field_0x14: "int",
+	},
+	[DataType.ModelAnimation]: {
+		__: {
+
+			displayName: "Animation",
+			nestedAllValues: true,
+			dataDivision: dataDivisions.anime,
+		},
+		
+		description: "string",
+		id: "string",
+	},	
 	[DataType.DataPlayerModel]: {
 		__: {
 			parent: DataType.DataNpcModel,
@@ -1650,7 +1786,9 @@ Specifies the type of the item. Possible values:
 	},
 	[DataType.DataMobjModel]: {
 		__: {
-			parent: DataType.DataNpcModel,
+			parent: DataType.ModelType,
+			dataDivision: dataDivisions.main,
+
 			mainSymbol: "wld::fld::data::s_modelMobj",
 			countSymbol: "wld::fld::data::modelMobj_num",
 			displayName: "Mobj Models",
@@ -1666,15 +1804,7 @@ Specifies the type of the item. Possible values:
 			romfsPath: "data/model/data_model_gobj.elf.zst",
 		},
 	},
-	[DataType.DataMobjModel]: {
-		__: {
-			parent: DataType.DataNpcModel,
-			mainSymbol: "wld::fld::data::s_modelMobj",
-			countSymbol: "wld::fld::data::modelMobj_num",
-			displayName: "Mobj Models",
-			romfsPath: "data/model/data_model_mobj.elf.zst",
-		},
-	},
+
 	[DataType.DataBattleModel]: {
 		__: {
 			parent: DataType.DataNpcModel,
