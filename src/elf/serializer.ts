@@ -3,8 +3,9 @@ import { DataType } from "./dataType";
 import { FILE_TYPES, type Instance } from "./fileTypes";
 import { BinaryWriter } from "./misc";
 import { Relocation, Section, Symbol } from "./types";
-import { noUndefinedMap } from "./util";
+import { enumerate, noUndefinedMap } from "./util";
 import type { UuidTagged } from "./valueIdentifier";
+import { mangleIdentifier } from "./nameMangling";
 
 type SectionName = string
 type Offset = number
@@ -43,11 +44,18 @@ export default function serializeElfBinary(dataType: DataType, binary: ElfBinary
 	const stringRelocations: Map<SectionName, Map<number, string>> = new Map()
 	const symbolRelocations: Map<SectionName, Map<number, SymbolName>> = new Map()
 	const symbolAddrRelocations: Map<SectionName, Map<number, SymbolName>> = new Map()
-	
+	const objectOffsets: WeakMap<object, Pointer> = new WeakMap()
+	const objectRelocations: Map<SectionName, Map<number, object>> = new Map()
+
 	const symbolLocationReference: Map<string, Pointer> = noUndefinedMap(new Map())
 	const symbolNameOverrides: Map<string, string> = noUndefinedMap(new Map())
 	const symbolSizeOverrides: Map<string, number> = noUndefinedMap(new Map())
 	
+
+
+
+
+
 	function findSection(sectionName: string): Section {
 		return sections.find(section => section.name == sectionName)
 	}
@@ -59,6 +67,17 @@ export default function serializeElfBinary(dataType: DataType, binary: ElfBinary
 	function findSymbol(name: string): Symbol {
 		return binary.symbolTable.find(symbol => symbol.name === name)
 	}
+
+	function findSymbolAt(section: Section, location: Pointer) {
+		return binary.symbolTable.find(symbol => symbol.location.equals(location) && sections[symbol.sectionHeaderIndex] == section && symbol.info != 0)
+	}
+	
+	function createMissingSymbol(name: string, section: Section): Symbol {
+		return binary.symbolTable.find(symbol => symbol.name === name)
+
+	}
+
+
 	
 	// We will start with the .data and .rodata section.
 	// These sections contain the main content, which can be various stuff depending on the data type,
@@ -90,6 +109,8 @@ export default function serializeElfBinary(dataType: DataType, binary: ElfBinary
 					stringRelocations: dataStringRelocations,
 					symbolRelocations: dataSymbols,
 					symbolAddrRelocations: dataSymbolAddrs,
+					crossPointers: undefined,
+
 				}
 
 				for (const itemTable of binary.data.main as Instance<typeof dataType>[]) {
@@ -123,6 +144,8 @@ export default function serializeElfBinary(dataType: DataType, binary: ElfBinary
 					stringRelocations: dataStringRelocations,
 					symbolRelocations: dataSymbols,
 					symbolAddrRelocations: dataSymbolAddrs,
+					crossPointers: undefined,
+
 				}
 
 				for (const dropTable of binary.data.main as Instance<typeof dataType>[]) {
@@ -153,6 +176,8 @@ export default function serializeElfBinary(dataType: DataType, binary: ElfBinary
 					writer: dataWriter,
 					stringRelocations: dataStringRelocations,
 					symbolRelocations: dataSymbols,
+					crossPointers: undefined,
+					
 				}
 
 				const header = binary.data.main[0] as Instance<DataType.MaplinkHeader>
@@ -188,6 +213,7 @@ export default function serializeElfBinary(dataType: DataType, binary: ElfBinary
 					writer: dataWriter,
 					stringRelocations: dataStringRelocations,
 					symbolRelocations: dataSymbols,
+					crossPointers: undefined,
 				}
 
 				const header = binary.data.main[0] as Instance<DataType.SndBattleHeader>
@@ -215,28 +241,51 @@ export default function serializeElfBinary(dataType: DataType, binary: ElfBinary
 				break
 			}
 
+
+			case DataType.DataBattleModel:
+			case DataType.DataGobjModel:
+			case DataType.DataItemModel:
 			case DataType.DataMobjModel:
-				{
-					// ----------------  data  ----------------
-					const dataSymbolAddr = new Map()
-					symbolAddrRelocations.set('.data', dataSymbolAddr)
-
-					let data: SerializeContext = {
-						writer: dataWriter,
-						stringRelocations: dataStringRelocations,
-						symbolAddrRelocations: dataSymbolAddr,
-					}
-
-					serializeObjects(data, dataType, binary.data.main, { padding: 1 })
-
-					break
+			case DataType.DataNpcModel:
+			case DataType.DataPlayerModel:
+			{
+				// ----------------  data  ----------------
+				let dataPointers = new Map()
+				objectRelocations.set('.data', dataPointers)
+				
+				let data: SerializeContext = {
+					writer: dataWriter,
+					stringRelocations: dataStringRelocations,
+					crossPointers: dataPointers,
 				}
-
+				
+				serializeObjects(data, dataType, binary.data.main, { padding: 1 })
+				
+				// ----------------  rodata  ----------------
+				let rodataStringRelocations = new Map()
+				stringRelocations.set('.rodata', rodataStringRelocations)
+				
+				let rodataPointers = new Map()
+				objectRelocations.set('.rodata', rodataPointers)
+				
+				let rodata: SerializeContext = {
+					writer: new BinaryWriter(),
+					stringRelocations: rodataStringRelocations,
+					crossPointers: rodataPointers,
+				}
+				
+				let serializedRodata = serializeModelRodata(rodata, binary.data.main, binary.data.main.length, "wld::fld::data")
+				updatedSections.set('.rodata', serializedRodata)
+				
+				break
+			}
 
 			default: {
 				let data: SerializeContext = {
 					writer: dataWriter,
 					stringRelocations: dataStringRelocations,
+					crossPointers: undefined,
+
 				}
 
 				let countSymbolName = FILE_TYPES[dataType].countSymbol
@@ -260,6 +309,8 @@ export default function serializeElfBinary(dataType: DataType, binary: ElfBinary
 			stringRelocations: Map<number, string>
 			symbolRelocations?: Map<number, SymbolName>
 			symbolAddrRelocations?: Map<number, SymbolName>
+			crossPointers: Map<number, object>
+		
 		}
 
 		interface SerializeObjectsProperties {
@@ -268,6 +319,252 @@ export default function serializeElfBinary(dataType: DataType, binary: ElfBinary
 			addStrings?: boolean
 			symbolWrapper?: { symbolName: string, children?: any, item?: any }
 		}
+	interface RawModelInstance {
+		id: string
+		assetGroups: Pointer
+		assetGroupCount: number
+		states: Pointer
+		stateCount: number
+	}
+		interface ModelInstance {
+			id: string
+			assetGroups: { symbolName: string, children: Instance<DataType.ModelAssetGroup>[] }
+			assetGroupCount: number
+			states: { symbolName: string, children: Instance<DataType.ModelState>[] }
+			stateCount: number
+		}
+		function serializeObjects(sectionElements: SerializeContext, dataType: DataType, objects: object[], properties: SerializeObjectsProperties = {}) {
+			const { writer, stringRelocations, crossPointers, symbolRelocations } = sectionElements
+			const { padding: paddingAmount = 0, paddingItem, addStrings = true, symbolWrapper } = properties
+			
+			if (symbolWrapper)
+				objectOffsets.set(symbolWrapper, new Pointer(writer.size))
+			
+			if (objects.length == 0 && !symbolWrapper) {
+				objectOffsets.set(objects, new Pointer(writer.size))
+			}
+			
+			if (paddingAmount > 0) {
+				let padding = Array.from({ length: paddingAmount }, paddingItem ? () => paddingItem : FILE_TYPES[dataType].instantiate)
+				objects = [...objects, ...padding]
+			}
+			
+			if (paddingAmount < 0) {
+				objects = objects.slice(0, objects.length + paddingAmount)
+			}
+			
+			for (const instance of objects) {
+				objectOffsets.set(instance, new Pointer(writer.size))
+				
+				for (const [fieldName, fieldType] of Object.entries(FILE_TYPES[dataType].typedef)) {
+					let fieldValue = instance[fieldName]
+					
+					switch (fieldType) {
+						case "string": 
+							if (addStrings)
+								allStrings.add(fieldValue)
+							
+							if (fieldValue != null)
+								stringRelocations.set(writer.size, fieldValue)
+							
+							writer.writeBigInt64(0n)
+							break
+						case "symbol": 
+							if (fieldValue != null)
+								symbolRelocations.set(writer.size, fieldValue.symbolName)
+							
+							writer.writeBigInt64(0n)
+							break
+						case "symbolAddr":
+							// empty arrays are null as well
+							if (!Pointer.NULL.equals(fieldValue) && fieldValue != null) {
+								crossPointers.set(writer.size, fieldValue)
+							}
+						
+							writer.writeBigInt64(0n)
+							break
+						case "Vector3": 
+							writer.writeFloat32(fieldValue.x)
+							writer.writeFloat32(fieldValue.y)
+							writer.writeFloat32(fieldValue.z)
+							break
+						case "float": 
+							writer.writeFloat32(fieldValue)
+							break
+						case "double": 
+							writer.writeFloat64(fieldValue)
+							break
+						case "byte": 
+							writer.writeUint8(fieldValue)
+							break
+						case "bool8": 
+							writer.writeUint8(fieldValue ? 1 : 0)
+							break
+						case "bool32": 
+							writer.writeUint32(fieldValue ? 1 : 0)
+							break
+						case "short": 
+							writer.writeInt16(fieldValue)
+							break
+						case "int": 
+							writer.writeInt32(fieldValue)
+							break
+						case "long": 
+							writer.writeBigInt64(BigInt(fieldValue))
+							break
+							
+						default:
+							throw new Error(`Unknown data type ${fieldType}`)
+					}
+				}
+			}
+		}
+
+		function serializeModelRodata(rodata: SerializeContext, models: ModelInstance[], modelNumber: number, modelNamespace: string) {
+			const rodataWriter = rodata.writer
+			
+			// .rodata section is structured like this:
+			
+			// AssetGroup[]
+			// State[]
+			// ...
+			// modelNpc_num (amount of objects in .data)
+			// for each entry in .data:
+			//   substate[]
+			//   substate[]
+			//     face[]
+			//       anime[]
+			//     face[]
+			//       anime[]
+			//       anime[]
+			//       ...
+			
+			// the strings in .rodata are serialized in this order:
+			// for each entry in .data
+			//     AssetGroup, State, all animes connected to this state...
+			
+			// While it may seem unnnecessary to serialize the strings in exactly
+			// the same order they were in originally, it is important to me that
+			// the input file and unmodified output file are exactly equal, in order
+			// to prevent bugs that would go unnoticed
+			
+			// step 1: Serialize Asset Groups, States and the strings from animes
+			for (const model of models) {
+				if (model.assetGroups == undefined || model.states == undefined)
+					continue
+				
+				// asset groups
+				const { assetGroups } = model
+				
+				let newAssetGroupSymbolName = `${modelNamespace}::^${model.id}_model_files`
+				
+				symbolLocationReference.set(assetGroups.symbolName, new Pointer(rodataWriter.size))
+				symbolNameOverrides.set(assetGroups.symbolName, newAssetGroupSymbolName)
+				symbolSizeOverrides.set(assetGroups.symbolName, (assetGroups.children.length + -1) * FILE_TYPES[DataType.ModelAssetGroup].size)
+				
+				model.assetGroups.symbolName = newAssetGroupSymbolName
+				model.assetGroupCount = assetGroups.children.length
+				
+				serializeObjects(rodata, DataType.ModelAssetGroup, assetGroups.children, { symbolWrapper: model.assetGroups, padding: 1 })
+				
+				// states
+				const { states } = model
+				
+				let newStateSymbolName = `${modelNamespace}::^${model.id}_state`
+				
+				symbolLocationReference.set(states.symbolName, new Pointer(rodataWriter.size))
+				symbolNameOverrides.set(states.symbolName, newStateSymbolName)
+				symbolSizeOverrides.set(states.symbolName, (states.children.length + -1) * FILE_TYPES[DataType.ModelState].size)
+				
+				model.states.symbolName = newStateSymbolName
+				model.stateCount = states.children.length
+				
+				serializeObjects(rodata, DataType.ModelState, states.children, { symbolWrapper: model.states, padding: 1 })
+				
+				for (const state of states.children) {
+					const substates = state.substates as { children: Instance<DataType.ModelFaceGroup>[], symbolName: string }
+					
+					for (const substate of substates.children) {
+						const faces = substate.faces as { children: Instance<DataType.ModelFace>[], symbolName: string }
+						
+						for (const face of faces.children) {
+							const animations = face.animations as { children: Instance<DataType.ModelAnimation>[], symbolName: string }
+							
+							serializeStringsOnly(DataType.ModelAnimation, animations.children)
+						}
+					}
+				}
+			}
+			
+			// step 2: serialize modelNpc_num
+			symbolLocationReference.set(FILE_TYPES[dataType].countSymbol, new Pointer(rodataWriter.size))
+			rodataWriter.writeBigInt64(BigInt(modelNumber))
+			
+			// step 3: serialize substates, faces and animes
+			for (const model of models) {
+				let animeCount = 0
+				
+				for (const [state, i] of enumerate(model.states.children)) {
+					const substates = state.substates as { children: Instance<DataType.ModelFaceGroup>[], symbolName: string }
+					const { children, symbolName } = substates
+					
+					let newSymbolName = `${modelNamespace}::^${model.id}_state${i}`
+					
+					symbolLocationReference.set(symbolName, new Pointer(rodataWriter.size))
+					symbolSizeOverrides.set(symbolName, (children.length + -1) * FILE_TYPES[DataType.ModelFaceGroup].size)
+					symbolNameOverrides.set(symbolName, newSymbolName)
+					
+					substates.symbolName = newSymbolName
+					state.substateCount = children.length
+					
+					serializeObjects(rodata, DataType.ModelFaceGroup, children, { symbolWrapper: substates, padding: 1 })
+				}
+				
+				for (const [state, i] of enumerate(model.states.children)) {
+					const substates = state.substates as { children: Instance<DataType.ModelFaceGroup>[], symbolName: string }
+					
+					for (const [substate, j] of enumerate(substates.children)) {
+						const faces = substate.faces as { children: Instance<DataType.ModelFace>[], symbolName: string }
+						const { children, symbolName } = faces
+						
+						let newSymbolName = `${modelNamespace}::^${model.id}_state${i}_face${j}`
+						
+						symbolLocationReference.set(symbolName, new Pointer(rodataWriter.size))
+						symbolSizeOverrides.set(symbolName, (children.length + -1) * FILE_TYPES[DataType.ModelFace].size)
+						symbolNameOverrides.set(symbolName, newSymbolName)
+						
+						faces.symbolName = newSymbolName
+						substate.faceCount = children.length
+						
+						serializeObjects(rodata, DataType.ModelFace, children, { symbolWrapper: faces, padding: 1 })
+					}
+					
+					for (const substate of substates.children) {
+						const faces = substate.faces as { children: Instance<DataType.ModelFace>[], symbolName: string }
+						
+						for (const face of faces.children) {
+							const animations = face.animations as { children: Instance<DataType.ModelAnimation>[], symbolName: string }
+							const { children, symbolName } = animations
+							
+							let newSymbolName = `${modelNamespace}::^${model.id}_anime${animeCount}`
+							
+							animeCount += 1
+							
+							symbolLocationReference.set(symbolName, new Pointer(rodataWriter.size))
+							symbolSizeOverrides.set(symbolName, (children.length + -1) * FILE_TYPES[DataType.ModelAnimation].size)
+							symbolNameOverrides.set(symbolName, newSymbolName)
+							
+							animations.symbolName = newSymbolName
+							face.animationCount = children.length
+							
+							serializeObjects(rodata, DataType.ModelAnimation, children, { symbolWrapper: animations, padding: 1 })
+						}
+					}
+				}
+			}
+			
+			return rodataWriter.toArrayBuffer()
+		}		
 
 		/**
 		 * Serializes an array of objects of a certain data type.
@@ -277,7 +574,7 @@ export default function serializeElfBinary(dataType: DataType, binary: ElfBinary
 		 * @param paddingAmount If positive, it will append as many zero value instances as specified. If negative, it will remove objects at the end.
 		 * @param addStrings If set to false, then the strings in the objects won't be added to the allStrings set.
 		 */
-		function serializeObjects(sectionElements: SerializeContext, dataType: DataType, objects: object[], properties: SerializeObjectsProperties = {}) {
+		function serializeObjects2(sectionElements: SerializeContext, dataType: DataType, objects: object[], properties: SerializeObjectsProperties = {}) {
 			const { writer, stringRelocations, symbolRelocations, symbolAddrRelocations } = sectionElements
 			const { padding: paddingAmount = 0, paddingItem, addStrings = true } = properties
 
@@ -512,6 +809,30 @@ export default function serializeElfBinary(dataType: DataType, binary: ElfBinary
 	}
 	
 	{
+		// pointer relocations
+		let destinationSection = dataType === DataType.DataUi ? ".data" : ".rodata"
+		let destinationSectionIndex = sections.findIndex(section => section.name === destinationSection)
+		let sectionSymbolIndex = binary.symbolTable.findIndex(symbol => symbol.info == 3 && symbol.sectionHeaderIndex == destinationSectionIndex)
+		
+		for (const [sectionName, sectionObjectRelocations] of objectRelocations) {
+			if (!allRelocations.has(sectionName))
+				allRelocations.set(sectionName, [])
+			
+			let rawRelocations: Relocation[] = allRelocations.get(sectionName)
+			
+			for (const [location, target] of sectionObjectRelocations) {
+				let targetLocation = objectOffsets.get(target instanceof Array && target.length > 0 ? target[0] : target)
+				
+				if (!targetLocation)
+					console.warn("No offset entry for object", target)
+				
+				if (targetLocation != Pointer.NULL && targetLocation != undefined)
+					rawRelocations.push(new Relocation(new Pointer(location), DEFAULT_RELOCATION_TYPE, sectionSymbolIndex, targetLocation))
+			}
+		}
+	}
+	
+	{
 		// symbol relocations
 		for (const [sectionName, sectionSymbolRelocations] of symbolRelocations) {
 			if (!allRelocations.has(sectionName))
@@ -520,27 +841,8 @@ export default function serializeElfBinary(dataType: DataType, binary: ElfBinary
 			let rawRelocations: Relocation[] = allRelocations.get(sectionName)
 			
 			for (const [location, targetSymbol] of sectionSymbolRelocations) {
-				let targetSymbolIndex = binary.symbolTable.findIndex(symbol => symbol.name === targetSymbol)
+				let targetSymbolIndex = binary.symbolTable.findIndex(symbol => demangle(symbol.name) === targetSymbol)
 				rawRelocations.push(new Relocation(new Pointer(location), DEFAULT_RELOCATION_TYPE, targetSymbolIndex, Pointer.ZERO))
-			}
-		}
-	}
-	
-	{
-		// symbol addr relocations
-		const targetSectionIndex = sections.findIndex(section => section.name === ".data")
-		const targetSectionSymbolIndex = binary.symbolTable.findIndex(symbol => symbol.info == 3
-			&& symbol.sectionHeaderIndex == targetSectionIndex)
-		
-		for (const [sectionName, sectionSymbolRelocations] of symbolAddrRelocations) {
-			if (!allRelocations.has(sectionName))
-				allRelocations.set(sectionName, [])
-			
-			let rawRelocations: Relocation[] = allRelocations.get(sectionName)
-			
-			for (const [location, targetSymbolName] of sectionSymbolRelocations) {
-				let targetSymbol = binary.symbolTable.find(symbol => symbol.name === targetSymbolName)
-				rawRelocations.push(new Relocation(new Pointer(location), DEFAULT_RELOCATION_TYPE, targetSectionSymbolIndex, targetSymbol.location))
 			}
 		}
 	}

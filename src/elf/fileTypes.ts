@@ -110,11 +110,12 @@ interface DataTypeMetadata {
 	defaultPadding?: number
 	countSymbol?: string
 	mainSymbol?: string
-	nestedAllValues?: boolean
 	
-	childTypes?: Typedef<DataType>,
+	childTypes?: Typedef<DataType>
 	childFieldLabel?: string
-	childField?: string	
+	childField?: string
+	nestedAllValues?: boolean
+	entryPoints?: {[objectType: number]: any}
 	// for future sub-types
 	// childField
 	// childFieldLabel
@@ -1566,57 +1567,6 @@ Specifies the type of the item. Possible values:
 		field_0x28: "int",
 		field_0x2c: "int",
 	},
-	[DataType.DataNpcModel]: {
-		__: {
-			displayName: "NPC Models",
-			mainSymbol: "wld::fld::data::s_modelNpc",
-			countSymbol: "wld::fld::data::modelNpc_num",
-			childTypes: {
-				assetGroups: DataType.ModelAssetGroup,
-				states: DataType.ModelState,
-            },
-		},
-
-		id: "string",
-		field_0x8: new Property("Vector3", "Usage unknown, but one guess would be scale? Please verify."),
-		field_0x14: "short",
-		field_0x16: "short",
-		field_0x18: "short",
-		field_0x1A: "short",
-		field_0x1c: "int",
-		field_0x20: "int",
-		field_0x24: "int",
-		field_0x28: "int",
-		field_0x2c: "int",
-		field_0x30: "int",
-		field_0x34: "int",
-		field_0x38: "float",
-		field_0x3c: "float",
-		field_0x40: "float",
-		field_0x44: "int",
-		field_0x48: "int",
-		field_0x4c: "int",
-		field_0x50: "int",
-		field_0x54: "float",
-		field_0x58: "float",
-		field_0x5c: "float",
-		field_0x60: "float",
-		field_0x64: "float",
-		field_0x68: "int",
-		field_0x6c: "float",
-		field_0x70: "float",
-		field_0x74: "float",
-		assetGroup: new Property("string", undefined, {
-			tabName: "Asset Groups for {type} {id}"
-		}),
-		assetGroupCount: new Property("int", undefined, { hidden: true }),
-		field_0x84: "int",
-		states: new Property("string", undefined, {
-			tabName: "States for {type} {id}",
-		}),
-		stateCount: new Property("int", undefined, { hidden: true }),
-		field_0x94: "int",
-	},
 	[DataType.ModelType]: {
 		__:{
 			dataDivision: dataDivisions.main,
@@ -1669,16 +1619,14 @@ Specifies the type of the item. Possible values:
 		field_0x94: "int",
 		
 	},
-
-
 	[DataType.ModelAssetGroup]: {
 		__: {
-
 			displayName: "Asset Group",
-			identifyingField: "fileName",
+			importantField: "fileName",
 			nestedAllValues: true,
-			dataDivision: dataDivisions.assetGroup,
+			objectType: dataDivisions.assetGroup,
 		},
+
 		modelFolder: "string",
 		fileName: "string",
 		field_0x10: "int",
@@ -1711,7 +1659,7 @@ Some commonly found translations:
 			tabName: "SubStates for {type} {id}",
 		}),
 		substateCount: new Property("int", undefined, {hidden: false}),
-		field_0x14: new Property("string", undefined, {hidden: false}),
+		field_0x14: new Property("int", undefined, {hidden: false}),
 	},
 	[DataType.ModelFaceGroup]: {
 		__: {
@@ -1766,9 +1714,19 @@ Some commonly found translations:
 		description: "string",
 		id: "string",
 	},	
+
+	[DataType.DataNpcModel]: {
+		__: {
+			parent: DataType.ModelType,
+			mainSymbol: "wld::fld::data::s_modelNpc",
+			countSymbol: "wld::fld::data::modelNpc_num",
+			displayName: "NPC Models",
+			romfsPath: "data/model/data_model_npc.elf.zst",
+		},	
+	},
 	[DataType.DataPlayerModel]: {
 		__: {
-			parent: DataType.DataNpcModel,
+			parent: DataType.ModelType,
 			mainSymbol: "wld::fld::data::s_modelPlayer",
 			countSymbol: "wld::fld::data::modelPlayer_num",
 			displayName: "Player Models",
@@ -1777,7 +1735,7 @@ Some commonly found translations:
 	},
 	[DataType.DataItemModel]: {
 		__: {
-			parent: DataType.DataNpcModel,
+			parent: DataType.ModelType,
 			mainSymbol: "wld::fld::data::s_modelItem",
 			countSymbol: "wld::fld::data::modelItem_num",
 			displayName: "Item Models",
@@ -1787,8 +1745,6 @@ Some commonly found translations:
 	[DataType.DataMobjModel]: {
 		__: {
 			parent: DataType.ModelType,
-			dataDivision: dataDivisions.main,
-
 			mainSymbol: "wld::fld::data::s_modelMobj",
 			countSymbol: "wld::fld::data::modelMobj_num",
 			displayName: "Mobj Models",
@@ -1797,17 +1753,16 @@ Some commonly found translations:
 	},
 	[DataType.DataGobjModel]: {
 		__: {
-			parent: DataType.DataNpcModel,
+			parent: DataType.ModelType,
 			mainSymbol: "wld::fld::data::s_modelGobj",
 			countSymbol: "wld::fld::data::modelGobj_num",
 			displayName: "Gobj Models",
 			romfsPath: "data/model/data_model_gobj.elf.zst",
 		},
 	},
-
 	[DataType.DataBattleModel]: {
 		__: {
-			parent: DataType.DataNpcModel,
+			parent: DataType.ModelType,
 			mainSymbol: "wld::fld::data::s_modelBattle",
 			countSymbol: "wld::fld::data::modelBattle_num",
 			displayName: "Battle Models",

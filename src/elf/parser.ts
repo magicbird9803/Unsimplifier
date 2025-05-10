@@ -6,7 +6,7 @@ import { BinaryReader, Vector3 } from "./misc";
 import { Relocation, Section, Symbol } from "./types";
 import { ValueUuid, VALUE_UUID, DATA_TYPE, type UuidTagged, ValueUuids } from "./valueIdentifier";
 import { peekable, type Peekable } from "./util";
-import { demangle } from "./nameMangling";
+import { demangle, mangleIdentifier } from "./nameMangling";
 
 export class EmptyFileError extends Error {
 	constructor(message: any) {
@@ -128,7 +128,12 @@ export default function parseElfBinary(dataType: DataType, arrayBuffer: ArrayBuf
 		states: Pointer
 		stateCount: number
 	}
-	
+	interface ModelInstance {
+		assetGroups: { symbolName: string, children: Instance<DataType.ModelAssetGroup>[] }
+		assetGroupCount: number
+		states: { symbolName: string, children: Instance<DataType.ModelState>[] }
+		stateCount: number
+	}
 
 	function parseModelRodata(datas: {[division in DataDivision]?: any[]},models: RawModelInstance[]) {
 		const rodataSection = findSection('.rodata')
@@ -302,11 +307,11 @@ export default function parseElfBinary(dataType: DataType, arrayBuffer: ArrayBuf
 		return symbolTable.find(symbol => symbol.location.equals(location) && sections[symbol.sectionHeaderIndex] == section && symbol.info != 0)
 	}
 	
-	function createMissingSymbol(name: string, section: Section): Symbol {
+	function createMissingSymbol(name: string, section: Section): Symbol{
 		let symbol = new Symbol()
 		
 		// TODO: these values are only verified to be correct for data_btl's models
-		symbol.name = name
+		symbol.name = mangleIdentifier(name)
 		symbol.sectionHeaderIndex = sections.indexOf(section)
 		symbol.info = 1
 		symbol.visibility = 0
@@ -460,25 +465,37 @@ export default function parseElfBinary(dataType: DataType, arrayBuffer: ArrayBuf
 
 			break
 		}
-
-		case DataType.DataMobjModel:{
-
-
+		case DataType.DataBattleModel:
+		case DataType.DataGobjModel:
+		case DataType.DataItemModel:
+		case DataType.DataMobjModel:
+		case DataType.DataNpcModel:
+		case DataType.DataPlayerModel:
+			{
 
 			const dataSection = findSection('.data')
 			const rodataSection = findSection('.rodata')
 			const dataStringSection = findSection('.rodata.str1.1')
-			let count: number
-			
-			let rodataView = new DataView(rodataSection.content)
-			
+	
 			// object count in .data is stored somewhere in .rodata, at symbol wld::fld::data::modelNpc_num
 			// because of name mangling, this equals _ZN3wld3fld4dataL12modelNpc_numE
 
+			const rodataView = new DataView(rodataSection.content)
+			let count: number
+			let countSymbolName = FILE_TYPES[dataType].countSymbol
+			let defaultPadding = FILE_TYPES[dataType].defaultPadding				
+			if (countSymbolName != null) {
 				const dataView = new DataView(rodataSection.content)
 				
-				let mainSymbol = findSymbol("wld::fld::data::modelMobj_num")
-				count = dataView.getBigInt64(mainSymbol.location.value, true)
+				let countSymbol = findSymbol(countSymbolName)
+				count = dataView.getBigInt64(countSymbol.location.value, true)
+			} else if (rodataSection != null) {
+				// the .rodata Section usually only contains 4 bytes, which are the amount of objects in .data
+				let rodataView = new DataView(rodataSection.content)
+				count = rodataView.getBigInt64(0, true)
+			} else {
+				count = rodataSection.size / FILE_TYPES[dataType].size - defaultPadding
+			}
 			
 			data = {}
 			data.main = applyStrings(
@@ -711,7 +728,7 @@ function parseSymbol2<T extends DataType>(containingSection: Section, stringSect
 	count = count ?? symbol.size / FILE_TYPES[dataType].size - subtract
 	
 	return applyStrings(
-		symbol.location, dataType, stringSection, allRelocations.get(containingSection.name), symbolTable,
+		symbol.location, dataType, stringSection, applyRelocations.get(containingSection.name), symbolTable,
 		
 		parseRawDataSection(containingSection, count, symbol.location, dataType),
 	)
